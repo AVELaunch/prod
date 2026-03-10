@@ -1,10 +1,11 @@
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, memo } from 'react';
 import { ReactFlow, Background, MiniMap, Controls, MarkerType } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { nodes as rawNodes, edges as rawEdges, NODE_COLORS, hubspotTable } from './funnelData';
+import { nodes as rawNodes, edges as rawEdges, NODE_COLORS, EDGE_STYLES } from './funnelData';
 import { getLayoutedElements } from './layoutEngine';
-import { nodeTypes } from './CustomNodes';
-import { edgeTypes } from './CustomEdges';
+import { nodeTypes, edgeTypes } from './flowTypes';
+import SidePanel from './SidePanel';
+import HubSpotTable from './HubSpotTable';
 
 // ─── Priority levels ────────────────────────────────────────────────────
 const PRIORITY_LEVELS = {
@@ -13,26 +14,36 @@ const PRIORITY_LEVELS = {
   'All': ['P1', 'P2', 'P3'],
 };
 
-// ─── Convert raw data to ReactFlow nodes/edges ─────────────────────────
-function buildFlowNodes(rawNodes) {
-  return rawNodes.map((n) => ({
+// ─── Resolve marker color for an edge ───────────────────────────────────
+function markerColorForEdge(edge) {
+  if (edge.edgeType === 'yes') return EDGE_STYLES.yes.stroke;
+  if (edge.edgeType === 'no') return EDGE_STYLES.no.stroke;
+  if (edge.isLoop) return EDGE_STYLES.loop.stroke;
+  return EDGE_STYLES.default.stroke;
+}
+
+// ─── Convert raw data to ReactFlow format ───────────────────────────────
+function toFlowNodes(dataNodes) {
+  return dataNodes.map((n) => ({
     id: n.id,
     type: n.type,
-    data: {
-      ...n,
-      nodeType: n.type,
-    },
+    data: { ...n, nodeType: n.type },
     position: { x: 0, y: 0 },
   }));
 }
 
-function buildFlowEdges(rawEdges) {
-  return rawEdges.map((e) => ({
+function toFlowEdges(dataEdges) {
+  return dataEdges.map((e) => ({
     id: e.id,
     source: e.source,
     target: e.target,
     type: 'funnel',
-    markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
+    markerEnd: {
+      type: MarkerType.ArrowClosed,
+      width: 16,
+      height: 16,
+      color: markerColorForEdge(e),
+    },
     data: {
       edgeType: e.edgeType,
       isLoop: e.isLoop,
@@ -42,156 +53,13 @@ function buildFlowEdges(rawEdges) {
   }));
 }
 
-// ─── Build node priority lookup ─────────────────────────────────────────
-const nodePriorityMap = Object.fromEntries(rawNodes.map((n) => [n.id, n.priority]));
-
-// ─── Compute layout once ────────────────────────────────────────────────
-const initialFlowNodes = buildFlowNodes(rawNodes);
-const initialFlowEdges = buildFlowEdges(rawEdges);
-const layoutedNodes = getLayoutedElements(initialFlowNodes, initialFlowEdges);
-
-// ─── Side Panel ─────────────────────────────────────────────────────────
-function SidePanel({ node, onClose }) {
-  if (!node) return null;
-  const d = node;
-
-  useEffect(() => {
-    const handler = (e) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [onClose]);
-
-  return (
-    <div className="fixed right-0 top-0 h-full w-96 bg-white shadow-2xl border-l border-gray-200 z-50 overflow-y-auto">
-      <div className="p-5">
-        <div className="flex justify-between items-start mb-4">
-          <h2 className="text-lg font-bold text-gray-900 leading-tight pr-4">{d.label}</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-700 text-xl font-bold shrink-0">×</button>
-        </div>
-
-        <div className="flex gap-2 mb-4">
-          <span className={`text-xs font-bold px-2 py-1 rounded border ${
-            d.priority === 'P1' ? 'bg-red-100 text-red-700 border-red-300' :
-            d.priority === 'P2' ? 'bg-yellow-100 text-yellow-700 border-yellow-300' :
-            'bg-blue-100 text-blue-700 border-blue-300'
-          }`}>{d.priority}</span>
-          <span className="text-xs px-2 py-1 rounded border capitalize" style={{
-            backgroundColor: NODE_COLORS[d.type]?.bg,
-            borderColor: NODE_COLORS[d.type]?.border,
-          }}>{NODE_COLORS[d.type]?.label || d.type}</span>
-        </div>
-
-        {d.detail?.description && (
-          <Section title="Description">
-            <p className="text-sm text-gray-600">{d.detail.description}</p>
-          </Section>
-        )}
-
-        {d.hubspot && (
-          <Section title="HubSpot Properties">
-            {d.hubspot.dealStage && <Prop label="Deal Stage" value={d.hubspot.dealStage} />}
-            {d.hubspot.leadStatus && <Prop label="Lead Status" value={d.hubspot.leadStatus} />}
-            {d.hubspot.lifecycleStage && <Prop label="Lifecycle Stage" value={d.hubspot.lifecycleStage} />}
-            {d.hubspot.note && <Prop label="Note" value={d.hubspot.note} />}
-            {d.hubspot.trigger && <Prop label="Trigger" value={d.hubspot.trigger} />}
-          </Section>
-        )}
-
-        {d.detail?.updatedBy && (
-          <Section title="Updated By">
-            <p className="text-sm text-gray-600">{d.detail.updatedBy}</p>
-          </Section>
-        )}
-
-        {d.detail?.trigger && (
-          <Section title="Trigger Mechanism">
-            <p className="text-sm text-gray-600">{d.detail.trigger}</p>
-          </Section>
-        )}
-
-        {d.emailer && d.emailer.sequence !== 'None' && (
-          <Section title="Emailer Integration">
-            <Prop label="Sequence" value={d.emailer.sequence} />
-            {d.emailer.variants && (
-              <div className="flex gap-1 my-1">
-                {d.emailer.variants.map((v) => (
-                  <span key={v} className="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">{v}</span>
-                ))}
-              </div>
-            )}
-            <Prop label="Email Count" value={d.emailer.emailCount} />
-            {d.emailer.timing && <Prop label="Timing" value={d.emailer.timing} />}
-            {d.emailer.goal && <Prop label="Goal" value={d.emailer.goal} />}
-            {d.emailer.cta && <Prop label="CTA" value={d.emailer.cta} />}
-            {d.emailer.subjects?.length > 0 && (
-              <div className="mt-2">
-                <span className="text-xs font-semibold text-gray-500">Email Subjects:</span>
-                <ul className="mt-1 space-y-1">
-                  {d.emailer.subjects.map((s, i) => (
-                    <li key={i} className="text-xs text-gray-600 bg-gray-50 rounded px-2 py-1">{s}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {d.emailer.contentAngle && (
-              <div className="mt-2">
-                <span className="text-xs font-semibold text-gray-500">Content Angle:</span>
-                <div className="mt-1 space-y-1">
-                  <div className="text-xs text-gray-600"><strong>WB:</strong> {d.emailer.contentAngle.WB}</div>
-                  <div className="text-xs text-gray-600"><strong>BIZ:</strong> {d.emailer.contentAngle.BIZ}</div>
-                </div>
-              </div>
-            )}
-          </Section>
-        )}
-
-        {d.emailer?.note && (
-          <Section title="Emailer Note">
-            <p className="text-sm text-gray-600">{d.emailer.note}</p>
-          </Section>
-        )}
-
-        {d.detail?.owner && (
-          <Section title="Content Owner">
-            <p className="text-sm text-gray-600">{d.detail.owner}</p>
-          </Section>
-        )}
-
-        {d.warnings?.length > 0 && (
-          <Section title="Warnings">
-            {d.warnings.map((w, i) => (
-              <div key={i} className="flex items-start gap-2 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded p-2 mb-1">
-                <span>⚠</span>
-                <span>{w}</span>
-              </div>
-            ))}
-          </Section>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function Section({ title, children }) {
-  return (
-    <div className="mb-4">
-      <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">{title}</h3>
-      {children}
-    </div>
-  );
-}
-
-function Prop({ label, value }) {
-  return (
-    <div className="flex justify-between text-sm py-0.5">
-      <span className="text-gray-500">{label}:</span>
-      <span className="text-gray-800 font-medium text-right max-w-[60%]">{String(value)}</span>
-    </div>
-  );
-}
+// ─── Compute layout once at module level ────────────────────────────────
+const flowNodes = toFlowNodes(rawNodes);
+const flowEdges = toFlowEdges(rawEdges);
+const layoutedNodes = getLayoutedElements(flowNodes, flowEdges);
 
 // ─── Segmentation Legend ────────────────────────────────────────────────
-function SegmentationLegend() {
+const SegmentationLegend = memo(function SegmentationLegend() {
   return (
     <div className="absolute top-16 right-4 z-40 bg-white rounded-lg border border-gray-200 shadow-sm p-3 w-56">
       <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Segmentation</h3>
@@ -210,24 +78,25 @@ function SegmentationLegend() {
       </div>
     </div>
   );
-}
+});
 
 // ─── Node Color Legend ──────────────────────────────────────────────────
-function ColorLegend() {
-  const items = [
-    { color: NODE_COLORS.entry, label: 'Lead Source / Entry' },
-    { color: NODE_COLORS.positive, label: 'Positive Outcome' },
-    { color: NODE_COLORS.lost, label: 'Lost / No-Show' },
-    { color: NODE_COLORS.decision, label: 'Decision (Yes/No)' },
-    { color: NODE_COLORS.sequence, label: 'Email Sequence' },
-    { color: NODE_COLORS.system, label: 'HubSpot Action' },
-    { color: NODE_COLORS.meeting, label: 'Call / Meeting' },
-  ];
+const LEGEND_ITEMS = [
+  { color: NODE_COLORS.entry, label: 'Lead Source / Entry' },
+  { color: NODE_COLORS.positive, label: 'Positive Outcome' },
+  { color: NODE_COLORS.lost, label: 'Lost / No-Show' },
+  { color: NODE_COLORS.decision, label: 'Decision (Yes/No)' },
+  { color: NODE_COLORS.sequence, label: 'Email Sequence' },
+  { color: NODE_COLORS.system, label: 'HubSpot Action' },
+  { color: NODE_COLORS.meeting, label: 'Call / Meeting' },
+];
+
+const ColorLegend = memo(function ColorLegend() {
   return (
     <div className="absolute bottom-14 left-4 z-40 bg-white rounded-lg border border-gray-200 shadow-sm p-3">
       <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Node Types</h3>
       <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-        {items.map((item) => (
+        {LEGEND_ITEMS.map((item) => (
           <div key={item.label} className="flex items-center gap-2 text-[11px]">
             <span className="w-3 h-3 rounded-sm border" style={{ backgroundColor: item.color.bg, borderColor: item.color.border }} />
             <span className="text-gray-600">{item.label}</span>
@@ -236,84 +105,7 @@ function ColorLegend() {
       </div>
     </div>
   );
-}
-
-// ─── HubSpot Table Panel ────────────────────────────────────────────────
-function csvQuote(val) {
-  const s = String(val);
-  if (s.includes(',') || s.includes('"') || s.includes('\n')) {
-    return '"' + s.replace(/"/g, '""') + '"';
-  }
-  return s;
-}
-
-function HubSpotTablePanel() {
-  const [open, setOpen] = useState(false);
-
-  const exportCSV = useCallback(() => {
-    const header = ['#', 'Deal Stage', 'Lead Status', 'Lifecycle', 'Emailer Sequence', 'Updated By', 'Trigger', 'Priority'];
-    const rows = hubspotTable.map((r) =>
-      [r.num, r.dealStage, r.leadStatus, r.lifecycle, r.emailerSequence, r.updatedBy, r.trigger, r.priority].map(csvQuote).join(',')
-    );
-    const csv = [header.join(','), ...rows].join('\n');
-    navigator.clipboard.writeText(csv).then(() => {
-      alert('CSV copied to clipboard!');
-    });
-  }, []);
-
-  return (
-    <div className="absolute bottom-0 left-0 right-0 z-40">
-      <button
-        onClick={() => setOpen(!open)}
-        className="w-full bg-white border-t border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 flex items-center justify-between"
-      >
-        <span>HubSpot Tagging Summary ({hubspotTable.length} stages)</span>
-        <span>{open ? '▼' : '▲'}</span>
-      </button>
-      {open && (
-        <div className="bg-white border-t border-gray-100 max-h-64 overflow-y-auto">
-          <div className="flex justify-end px-4 py-2">
-            <button
-              onClick={exportCSV}
-              className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1 rounded border border-gray-300 font-medium"
-            >
-              Export CSV to Clipboard
-            </button>
-          </div>
-          <table className="w-full text-xs">
-            <thead className="bg-gray-50 sticky top-0">
-              <tr>
-                {['#', 'Deal Stage', 'Lead Status', 'Lifecycle', 'Emailer Sequence', 'Updated By', 'Trigger', 'Priority'].map((h) => (
-                  <th key={h} className="px-3 py-2 text-left text-gray-500 font-semibold border-b">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {hubspotTable.map((row) => (
-                <tr key={row.num} className="hover:bg-gray-50 border-b border-gray-100">
-                  <td className="px-3 py-1.5 text-gray-400">{row.num}</td>
-                  <td className="px-3 py-1.5 font-medium text-gray-800">{row.dealStage}</td>
-                  <td className="px-3 py-1.5 text-gray-600">{row.leadStatus}</td>
-                  <td className="px-3 py-1.5 text-gray-600">{row.lifecycle}</td>
-                  <td className="px-3 py-1.5 font-mono text-purple-700">{row.emailerSequence}</td>
-                  <td className="px-3 py-1.5 text-gray-600">{row.updatedBy}</td>
-                  <td className="px-3 py-1.5 text-gray-600">{row.trigger}</td>
-                  <td className="px-3 py-1.5">
-                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
-                      row.priority === 'P1' ? 'bg-red-100 text-red-700 border-red-300' :
-                      row.priority === 'P2' ? 'bg-yellow-100 text-yellow-700 border-yellow-300' :
-                      'bg-blue-100 text-blue-700 border-blue-300'
-                    }`}>{row.priority}</span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
+});
 
 // ─── Priority Filter ────────────────────────────────────────────────────
 function PriorityFilter({ active, onChange }) {
@@ -336,6 +128,11 @@ function PriorityFilter({ active, onChange }) {
   );
 }
 
+// ─── MiniMap node color helper ──────────────────────────────────────────
+function minimapNodeColor(n) {
+  return NODE_COLORS[n.type]?.border || '#6b7280';
+}
+
 // ─── Main App ───────────────────────────────────────────────────────────
 export default function App() {
   const [priorityFilter, setPriorityFilter] = useState('P1 Only');
@@ -343,7 +140,6 @@ export default function App() {
 
   const allowedPriorities = PRIORITY_LEVELS[priorityFilter];
 
-  // Compute visible node IDs first, then use for edge filtering
   const visibleNodeIds = useMemo(() => {
     return new Set(rawNodes.filter((n) => allowedPriorities.includes(n.priority)).map((n) => n.id));
   }, [allowedPriorities]);
@@ -355,9 +151,8 @@ export default function App() {
     }));
   }, [visibleNodeIds]);
 
-  // Edge is visible only if BOTH source and target nodes are visible
   const visibleEdges = useMemo(() => {
-    return initialFlowEdges.map((e) => ({
+    return flowEdges.map((e) => ({
       ...e,
       hidden: !visibleNodeIds.has(e.source) || !visibleNodeIds.has(e.target),
     }));
@@ -366,6 +161,8 @@ export default function App() {
   const onNodeClick = useCallback((_event, node) => {
     setSelectedNode(node.data);
   }, []);
+
+  const closePanel = useCallback(() => setSelectedNode(null), []);
 
   return (
     <div className="w-full h-screen bg-gray-50 relative">
@@ -383,23 +180,22 @@ export default function App() {
         fitViewOptions={{ padding: 0.2 }}
         minZoom={0.1}
         maxZoom={2}
-        proOptions={{ hideAttribution: true }}
       >
         <Background color="#e2e8f0" gap={20} />
         <MiniMap
-          nodeColor={(n) => NODE_COLORS[n.type]?.border || '#6b7280'}
+          nodeColor={minimapNodeColor}
           maskColor="rgba(0,0,0,0.08)"
           className="!bottom-12 !right-4"
         />
         <Controls className="!bottom-12 !left-auto !right-64" />
       </ReactFlow>
 
-      <HubSpotTablePanel />
+      <HubSpotTable />
 
       {selectedNode && (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setSelectedNode(null)} />
-          <SidePanel node={selectedNode} onClose={() => setSelectedNode(null)} />
+          <div className="fixed inset-0 z-40" onClick={closePanel} />
+          <SidePanel node={selectedNode} onClose={closePanel} />
         </>
       )}
     </div>

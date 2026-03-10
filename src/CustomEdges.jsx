@@ -49,7 +49,7 @@ export function FunnelEdge({
             style={{
               position: 'absolute',
               transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
-              pointerEvents: 'all',
+              pointerEvents: 'none',
               backgroundColor: edgeType === 'yes' ? '#dcfce7' : edgeType === 'no' ? '#fee2e2' : '#f1f5f9',
               color: edgeType === 'yes' ? '#166534' : edgeType === 'no' ? '#991b1b' : '#475569',
               borderColor: edgeType === 'yes' ? '#86efac' : edgeType === 'no' ? '#fca5a5' : '#cbd5e1',
@@ -68,7 +68,3 @@ export function FunnelEdge({
     </>
   );
 }
-
-export const edgeTypes = {
-  funnel: FunnelEdge,
-};

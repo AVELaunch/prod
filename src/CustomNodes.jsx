@@ -119,13 +119,3 @@ export function MeetingNode({ data }) {
   return <BaseNode data={data} colors={NODE_COLORS.meeting} />;
 }
 
-// --- Node type registry for ReactFlow ---
-export const nodeTypes = {
-  entry: EntryNode,
-  positive: PositiveNode,
-  lost: LostNode,
-  decision: DecisionNode,
-  sequence: SequenceNode,
-  system: SystemNode,
-  meeting: MeetingNode,
-};
