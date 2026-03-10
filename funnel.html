@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AVELaunch Books — Sales Funnel</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xyflow/react@12/dist/style.css" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body, #root { width: 100%; height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    body { background: #f8fafc; color: #1e293b; }
+    #loading-overlay {
+      position: fixed; inset: 0; z-index: 9999; background: #f8fafc;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      transition: opacity 0.4s ease;
+    }
+    #loading-overlay.fade-out { opacity: 0; pointer-events: none; }
+    #loading-overlay h1 { font-size: 28px; font-weight: 800; color: #1e293b; margin-bottom: 8px; }
+    #loading-overlay p { font-size: 16px; color: #64748b; }
+    .react-flow__node { cursor: pointer; }
+  </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "react": "https://esm.sh/react@18.2.0",
+      "react/": "https://esm.sh/react@18.2.0/",
+      "react-dom": "https://esm.sh/react-dom@18.2.0?external=react",
+      "react-dom/": "https://esm.sh/react-dom@18.2.0&external=react/",
+      "react-dom/client": "https://esm.sh/react-dom@18.2.0/client?external=react",
+      "@xyflow/react": "https://esm.sh/@xyflow/react@12?external=react,react-dom",
+      "@xyflow/react/": "https://esm.sh/@xyflow/react@12&external=react,react-dom/",
+      "@xyflow/system": "https://esm.sh/@xyflow/system@0.45.0?external=react,react-dom",
+      "dagre": "https://esm.sh/dagre@0.8.5",
+      "htm": "https://esm.sh/htm@3"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="loading-overlay">
+    <h1>AVELaunch Books</h1>
+    <p>Loading Sales Funnel...</p>
+  </div>
+  <div id="root"></div>
+
+  <script type="module">
+import React from 'react';
+import { useState, useMemo, useCallback, useEffect, memo } from 'react';
+import { createRoot } from 'react-dom/client';
+import {
+  ReactFlow, Background, MiniMap, Controls,
+  Handle, Position, MarkerType, BaseEdge,
+  getBezierPath, getSmoothStepPath
+} from '@xyflow/react';
+import dagre from 'dagre';
+import htm from 'htm';
+
+const html = htm.bind(React.createElement);
+
+// =============================================================================
+// DATA
+// =============================================================================
+
+const STAGES = [
+  { id: "11", code: "11", label: "Warmup", group: "1x", color: "#dbeafe", type: "sequence",
+    sequence: "WARMUP_[SEG]", emails: 5, days: "7-10d", trigger: "Contact created (auto form / manual)",
+    updatedBy: "Auto (form) / Salesperson", goal: "Book Qualification Call",
+    hubspot: "Funnel Stage = 11-warmup", mailerLite: "Segment trigger -> WARMUP sequence", priority: "P1" },
+  { id: "12", code: "12", label: "Warmup Ghost", group: "1x", color: "#fef9c3", type: "ghost",
+    sequence: "GHOST_WARMUP_[SEG]", emails: 2, days: "5d", trigger: "Warmup ended, no booking",
+    updatedBy: "Salesperson", goal: "Re-engage",
+    hubspot: "Funnel Stage = 12-warmup-ghost", mailerLite: "GHOST_WARMUP sequence", priority: "P1" },
+  { id: "13", code: "13", label: "Unqualified", group: "1x", color: "#fce7f3", type: "lost",
+    sequence: "NURTURE_[SEG]", emails: 2, days: "soft", trigger: "Any stage - not our client",
+    updatedBy: "Salesperson", goal: "Gentle nurture, door open",
+    hubspot: "Funnel Stage = 13-unqualified", mailerLite: "NURTURE sequence", priority: "P2" },
+  { id: "21", code: "21", label: "Qual Call Scheduled", group: "2x", color: "#bae6fd", type: "call",
+    sequence: "REMINDER_QUALIFICATION_[SEG]", emails: 2, trigger: "Lead booked first call",
+    updatedBy: "Salesperson", goal: "Ensure attendance",
+    hubspot: "Funnel Stage = 21-qual-scheduled", mailerLite: "REMINDER_QUALIFICATION sequence", priority: "P1" },
+  { id: "22", code: "22", label: "Qual Call No-Show", group: "2x", color: "#fed7aa", type: "noshow",
+    sequence: "NOSHOW_QUALIFICATION_[SEG]", emails: 3, days: "6d", trigger: "Did not show. Max 2 reschedule attempts",
+    updatedBy: "Salesperson", goal: "Reschedule", warning: "Max 2 attempts -> Cold After Warmup",
+    hubspot: "Funnel Stage = 22-qual-noshow", mailerLite: "NOSHOW_QUALIFICATION sequence", priority: "P1" },
+  { id: "23", code: "23", label: "Qual Call Held", group: "2x", color: "#bbf7d0", type: "milestone",
+    sequence: null, trigger: "Call completed",
+    updatedBy: "Salesperson", goal: "Decide: send offer or Unqualified",
+    hubspot: "Funnel Stage = 23-qual-held", mailerLite: "\u2014", priority: "P1" },
+  { id: "31", code: "31", label: "Intro Offer Sent", group: "3x", color: "#bfdbfe", type: "sequence",
+    sequence: "OFFER_FOLLOWUP_[SEG]", emails: 3, days: "5d", trigger: "Discovery Sprint offer sent after call",
+    updatedBy: "Salesperson", goal: "Book Closing Call",
+    hubspot: "Funnel Stage = 31-offer-sent", mailerLite: "OFFER_FOLLOWUP sequence", priority: "P2" },
+  { id: "32", code: "32", label: "Intro Offer Ghost", group: "3x", color: "#fef9c3", type: "ghost",
+    sequence: "OFFER_GHOST_[SEG]", emails: 2, trigger: "No response after offer",
+    updatedBy: "Salesperson", goal: "Re-engage",
+    hubspot: "Funnel Stage = 32-offer-ghost", mailerLite: "OFFER_GHOST sequence", priority: "P2" },
+  { id: "33", code: "33", label: "Cold After Warmup", group: "3x", color: "#451a03", type: "archive",
+    sequence: null, trigger: "2 No-Show attempts, no response",
+    updatedBy: "Salesperson", goal: "Quarterly reactivation - low priority",
+    hubspot: "Funnel Stage = 33-cold", mailerLite: "\u2014", priority: "P3", textLight: true },
+  { id: "41", code: "41", label: "Closing Call Scheduled", group: "4x", color: "#e9d5ff", type: "call",
+    sequence: "REMINDER_CLOSING_[SEG]", emails: 2, trigger: "Lead confirmed Closing call",
+    updatedBy: "Salesperson", goal: "Ensure attendance",
+    hubspot: "Funnel Stage = 41-closing-scheduled", mailerLite: "REMINDER_CLOSING sequence", priority: "P2" },
+  { id: "42", code: "42", label: "Closing Call No-Show", group: "4x", color: "#ffe4e6", type: "noshow",
+    sequence: "NOSHOW_CLOSING_[SEG]", emails: 2, trigger: "Did not show. Max 2 attempts",
+    updatedBy: "Salesperson", goal: "Reschedule", warning: "Max 2 attempts -> Lost After Closing",
+    hubspot: "Funnel Stage = 42-closing-noshow", mailerLite: "NOSHOW_CLOSING sequence", priority: "P2" },
+  { id: "43", code: "43", label: "Closing Call Held", group: "4x", color: "#bbf7d0", type: "milestone",
+    sequence: null, trigger: "Call completed",
+    updatedBy: "Salesperson", goal: "Await payment. Create Deal in HubSpot here.",
+    hubspot: "Funnel Stage = 43-closing-held -> CREATE DEAL", mailerLite: "\u2014", priority: "P2", dealCreation: true },
+  { id: "44", code: "44", label: "Lost After Closing", group: "4x", color: "#fce7f3", type: "archive",
+    sequence: null, trigger: "No purchase after Closing Call",
+    updatedBy: "Salesperson", goal: "Quarterly reactivation - medium priority",
+    hubspot: "Funnel Stage = 44-lost-closing", mailerLite: "\u2014", priority: "P3" },
+  { id: "71", code: "71", label: "Intro Project Active", group: "7x", color: "#ccfbf1", type: "client",
+    sequence: "ONBOARDING_SPRINT_[SEG]", emails: 3, trigger: "Discovery Sprint payment confirmed",
+    updatedBy: "Salesperson", goal: "Smooth onboarding -> promo for Full Contract",
+    hubspot: "Deal Stage = intro-active", mailerLite: "ONBOARDING_SPRINT sequence", priority: "P2" },
+  { id: "72", code: "72", label: "Intro In Delivery", group: "7x", color: "#ede9fe", type: "client",
+    sequence: null, trigger: "Onboarding sequence completed",
+    updatedBy: "Production", goal: "Production works silently",
+    hubspot: "Deal Stage = intro-delivery", mailerLite: "\u2014", priority: "P3" },
+  { id: "73", code: "73", label: "Intro Project Review", group: "7x", color: "#fae8ff", type: "call",
+    sequence: "REMINDER_REVIEW_[SEG]", emails: 2, trigger: "Sprint complete, review call scheduled",
+    updatedBy: "Salesperson", goal: "Present results -> close Full Contract",
+    hubspot: "Deal Stage = intro-review", mailerLite: "REMINDER_REVIEW sequence", priority: "P3" },
+  { id: "74", code: "74", label: "Full Offer Objections", group: "7x", color: "#ffe4e6", type: "noshow",
+    sequence: "OBJECTIONS_FULL_[SEG]", emails: 2, trigger: "Did not sign after Review call",
+    updatedBy: "Salesperson", goal: "Handle objections, close",
+    hubspot: "Deal Stage = objections", mailerLite: "OBJECTIONS_FULL sequence", priority: "P3" },
+  { id: "81", code: "81", label: "Contract Signed", group: "8x", color: "#bbf7d0", type: "client",
+    sequence: "ONBOARDING_FULL_[SEG]", emails: 3, trigger: "Full contract signed",
+    updatedBy: "Salesperson", goal: "Full onboarding",
+    hubspot: "Deal Stage = contract-signed", mailerLite: "ONBOARDING_FULL sequence", priority: "P3" },
+  { id: "82", code: "82", label: "Active Client", group: "8x", color: "#f0fdf4", type: "client",
+    sequence: null, trigger: "Onboarding complete",
+    updatedBy: "Production", goal: "Production leads the client",
+    hubspot: "Deal Stage = active-client", mailerLite: "\u2014", priority: "P3" },
+  { id: "00", code: "00", label: "Client Lost", group: "00", color: "#1e293b", type: "archive",
+    sequence: null, trigger: "Client left after contract started",
+    updatedBy: "Salesperson", goal: "Quarterly reactivation - high priority",
+    hubspot: "Deal Stage = lost", mailerLite: "\u2014", priority: "P3", textLight: true },
+];
+
+const ENTRY_NODES = [
+  { id: "ENTRY_FORM", label: "Web Form", color: "#3b82f6" },
+  { id: "ENTRY_MANUAL", label: "Manual Entry", color: "#6366f1" },
+];
+
+const EDGES = [
+  { source: "ENTRY_FORM", target: "11", label: "auto" },
+  { source: "ENTRY_MANUAL", target: "11", label: "manual" },
+  { source: "11", target: "21", label: "booked" },
+  { source: "11", target: "12", label: "no response" },
+  { source: "12", target: "21", label: "re-engaged" },
+  { source: "12", target: "33", label: "no response" },
+  { source: "11", target: "13", label: "not a fit" },
+  { source: "12", target: "13", label: "not a fit" },
+  { source: "21", target: "22", label: "no-show" },
+  { source: "21", target: "23", label: "held" },
+  { source: "22", target: "21", label: "reschedule (max 2\u00d7)", loop: true },
+  { source: "22", target: "33", label: "2\u00d7 no response" },
+  { source: "23", target: "31", label: "offer sent" },
+  { source: "23", target: "13", label: "not a fit" },
+  { source: "31", target: "41", label: "booked" },
+  { source: "31", target: "32", label: "ghosted" },
+  { source: "32", target: "41", label: "re-engaged" },
+  { source: "32", target: "44", label: "no response" },
+  { source: "41", target: "42", label: "no-show" },
+  { source: "41", target: "43", label: "held" },
+  { source: "42", target: "41", label: "reschedule (max 2\u00d7)", loop: true },
+  { source: "42", target: "44", label: "2\u00d7 no response" },
+  { source: "43", target: "71", label: "payment received" },
+  { source: "43", target: "44", label: "no purchase" },
+  { source: "71", target: "72", label: "onboarding done" },
+  { source: "72", target: "73", label: "sprint complete" },
+  { source: "73", target: "81", label: "signed" },
+  { source: "73", target: "74", label: "objections" },
+  { source: "74", target: "81", label: "resolved" },
+  { source: "74", target: "44", label: "lost" },
+  { source: "81", target: "82", label: "onboarding done" },
+  { source: "82", target: "00", label: "client left" },
+];
+
+// =============================================================================
+// CONSTANTS
+// =============================================================================
+
+const GROUP_COLORS = {
+  "1x": "#3b82f6", "2x": "#0ea5e9", "3x": "#8b5cf6", "4x": "#a855f7",
+  "7x": "#14b8a6", "8x": "#22c55e", "00": "#64748b", "entry": "#6366f1",
+};
+
+const GROUP_LABELS = {
+  "1x": "Warmup Zone", "2x": "Qualification Call", "3x": "Offer", "4x": "Closing Call",
+  "7x": "Delivery", "8x": "Contract", "00": "Archive", "entry": "Entry Points",
+};
+
+const TYPE_ICONS = {
+  sequence: "\ud83d\udce7", ghost: "\ud83d\udc7b", lost: "\u274c", call: "\ud83d\udcde",
+  noshow: "\u26a0\ufe0f", milestone: "\u2705", archive: "\ud83d\uddc4\ufe0f", client: "\ud83e\udd1d",
+  entry: "\u27a1\ufe0f",
+};
+
+const POSITIVE_LABELS = new Set([
+  "booked", "held", "re-engaged", "offer sent", "payment received",
+  "onboarding done", "sprint complete", "signed", "resolved", "auto", "manual"
+]);
+const NEGATIVE_LABELS = new Set([
+  "no response", "no-show", "not a fit", "ghosted", "no purchase",
+  "2\u00d7 no response", "lost", "client left", "objections"
+]);
+
+function edgeColor(label) {
+  if (POSITIVE_LABELS.has(label)) return "#22c55e";
+  if (NEGATIVE_LABELS.has(label)) return "#ef4444";
+  return "#94a3b8";
+}
+function edgeWidth(label) {
+  if (POSITIVE_LABELS.has(label)) return 2.5;
+  if (NEGATIVE_LABELS.has(label)) return 1.5;
+  return 1.5;
+}
+
+const VIEWS = ["Lead Journey", "HubSpot Setup", "Email Sequences", "Full Detail"];
+
+function getSubtitle(stage, view) {
+  switch (view) {
+    case "Lead Journey": return stage.goal || "";
+    case "HubSpot Setup": return stage.hubspot || "";
+    case "Email Sequences":
+      return stage.sequence ? stage.sequence + " (" + stage.emails + " emails)" : "";
+    case "Full Detail": return stage.trigger || "";
+    default: return "";
+  }
+}
+
+// =============================================================================
+// LAYOUT ENGINE
+// =============================================================================
+
+const STAGE_W = 280, STAGE_H = 88, ENTRY_W = 140, ENTRY_H = 52;
+
+function computeLayout(visibleStages, visibleEntries, visibleEdges) {
+  const g = new dagre.graphlib.Graph();
+  g.setGraph({ rankdir: "LR", nodesep: 70, ranksep: 120, marginx: 40, marginy: 40 });
+  g.setDefaultEdgeLabel(() => ({}));
+
+  visibleEntries.forEach(e => g.setNode(e.id, { width: ENTRY_W, height: ENTRY_H }));
+  visibleStages.forEach(s => g.setNode(s.id, { width: STAGE_W, height: STAGE_H }));
+  visibleEdges.forEach(e => g.setEdge(e.source, e.target));
+
+  dagre.layout(g);
+
+  const positions = {};
+  g.nodes().forEach(id => {
+    const n = g.node(id);
+    if (n) positions[id] = { x: n.x - n.width / 2, y: n.y - n.height / 2 };
+  });
+  return positions;
+}
+
+// =============================================================================
+// CUSTOM NODES
+// =============================================================================
+
+const StageNode = memo(function StageNode({ data }) {
+  const stage = data.stage;
+  const view = data.view;
+  const groupColor = GROUP_COLORS[stage.group] || "#64748b";
+  const icon = TYPE_ICONS[stage.type] || "";
+  const subtitle = getSubtitle(stage, view);
+  const textColor = stage.textLight ? "#f8fafc" : "#1e293b";
+  const subtitleColor = stage.textLight ? "#cbd5e1" : "#475569";
+
+  return html`
+    <div style=${{
+      width: STAGE_W, height: STAGE_H, borderRadius: 14, border: "2px solid " + groupColor,
+      background: stage.color, padding: "10px 14px", display: "flex", flexDirection: "column",
+      justifyContent: "center", gap: 4, boxShadow: "0 2px 8px rgba(0,0,0,0.08)", position: "relative",
+      cursor: "pointer",
+    }}>
+      <${Handle} type="target" position=${Position.Left}
+        style=${{ background: groupColor, width: 10, height: 10, border: "2px solid #fff" }} />
+      <${Handle} type="source" position=${Position.Right}
+        style=${{ background: groupColor, width: 10, height: 10, border: "2px solid #fff" }} />
+      <div style=${{ display: "flex", alignItems: "center", gap: 6 }}>
+        <span style=${{ fontSize: 18, lineHeight: 1 }}>${icon}</span>
+        <span style=${{ fontSize: 16, fontWeight: 700, color: textColor, whiteSpace: "nowrap",
+          overflow: "hidden", textOverflow: "ellipsis", flex: 1 }}>
+          ${stage.code} ${stage.label}
+        </span>
+        ${stage.dealCreation && html`<span style=${{
+          background: "#f59e0b", color: "#fff", fontSize: 11, fontWeight: 700,
+          padding: "1px 6px", borderRadius: 4, whiteSpace: "nowrap"
+        }}>DEAL</span>`}
+        ${stage.warning && html`<span style=${{
+          background: "#ef4444", color: "#fff", fontSize: 11, fontWeight: 700,
+          padding: "1px 6px", borderRadius: 4
+        }}>\u26a0</span>`}
+      </div>
+      <div style=${{ fontSize: 14, fontWeight: 400, color: subtitleColor,
+        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        ${subtitle}
+      </div>
+    </div>
+  `;
+});
+
+const EntryNode = memo(function EntryNode({ data }) {
+  const entry = data.entry;
+  return html`
+    <div style=${{
+      width: ENTRY_W, height: ENTRY_H, borderRadius: 26, background: entry.color,
+      display: "flex", alignItems: "center", justifyContent: "center", color: "#fff",
+      fontSize: 16, fontWeight: 700, boxShadow: "0 2px 8px rgba(0,0,0,0.12)", cursor: "pointer",
+    }}>
+      <${Handle} type="source" position=${Position.Right}
+        style=${{ background: "#fff", width: 10, height: 10, border: "2px solid " + entry.color }} />
+      ${entry.label}
+    </div>
+  `;
+});
+
+// =============================================================================
+// CUSTOM EDGE
+// =============================================================================
+
+const FunnelEdge = memo(function FunnelEdge(props) {
+  const { sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition,
+    data, markerEnd, style: edgeStyle } = props;
+  const isLoop = data && data.loop;
+  const label = data && data.label || "";
+  const color = edgeColor(label);
+
+  let path, labelX, labelY;
+  if (isLoop) {
+    const result = getSmoothStepPath({
+      sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, borderRadius: 20,
+    });
+    path = result[0]; labelX = result[1]; labelY = result[2];
+  } else {
+    const result = getBezierPath({
+      sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition,
+    });
+    path = result[0]; labelX = result[1]; labelY = result[2];
+  }
+
+  return html`
+    <g>
+      <${BaseEdge} path=${path} markerEnd=${markerEnd}
+        style=${{ ...edgeStyle, stroke: color, strokeWidth: edgeWidth(label),
+          strokeDasharray: isLoop ? "6 3" : undefined }} />
+      ${label && html`
+        <foreignObject x=${labelX - 50} y=${labelY - 12} width=${100} height=${24}
+          style=${{ overflow: "visible", pointerEvents: "none" }}>
+          <div style=${{
+            fontSize: 13, fontWeight: 600, color: color, textAlign: "center",
+            background: "rgba(248,250,252,0.9)", borderRadius: 4, padding: "1px 4px",
+            whiteSpace: "nowrap", display: "inline-block", width: "100%",
+          }}>
+            ${label}
+          </div>
+        </foreignObject>
+      `}
+    </g>
+  `;
+});
+
+const nodeTypes = { stage: StageNode, entry: EntryNode };
+const edgeTypes = { funnel: FunnelEdge };
+
+// =============================================================================
+// TOP BAR
+// =============================================================================
+
+const TopBar = memo(function TopBar({ activeView, onViewChange, stageCount, edgeCount }) {
+  return html`
+    <div style=${{
+      position: "fixed", top: 0, left: 0, right: 0, height: 56, zIndex: 1000,
+      background: "linear-gradient(135deg, #1e293b, #334155)", display: "flex",
+      alignItems: "center", padding: "0 20px", boxShadow: "0 2px 12px rgba(0,0,0,0.15)",
+    }}>
+      <div style=${{ flex: "0 0 auto", marginRight: 32 }}>
+        <div style=${{ fontSize: 20, fontWeight: 800, color: "#fff" }}>AVELaunch</div>
+        <div style=${{ fontSize: 16, fontWeight: 500, color: "#94a3b8", marginTop: -2 }}>Sales Funnel</div>
+      </div>
+      <div style=${{ flex: 1, display: "flex", justifyContent: "center", gap: 4 }}>
+        ${VIEWS.map(v => html`
+          <button key=${v} onClick=${() => onViewChange(v)} style=${{
+            padding: "6px 16px", borderRadius: 20, border: "none", cursor: "pointer",
+            fontSize: 14, fontWeight: 600, transition: "all 0.2s",
+            background: v === activeView ? "#fff" : "transparent",
+            color: v === activeView ? "#1e293b" : "#94a3b8",
+          }}>${v}</button>
+        `)}
+      </div>
+      <div style=${{ flex: "0 0 auto", fontSize: 14, fontWeight: 400, color: "#94a3b8" }}>
+        ${stageCount} stages \u00b7 ${edgeCount} edges
+      </div>
+    </div>
+  `;
+});
+
+// =============================================================================
+// DETAIL CARD
+// =============================================================================
+
+const DetailCard = memo(function DetailCard({ stage, onClose }) {
+  if (!stage) return null;
+  const groupColor = GROUP_COLORS[stage.group] || "#64748b";
+  const icon = TYPE_ICONS[stage.type] || "";
+
+  const fields = [
+    ["Group", GROUP_LABELS[stage.group] || stage.group],
+    ["Trigger", stage.trigger],
+    ["Updated by", stage.updatedBy],
+    ["Goal", stage.goal],
+  ];
+  if (stage.sequence) fields.push(["Sequence", stage.sequence]);
+  if (stage.emails) fields.push(["Emails", stage.emails + (stage.days ? " over " + stage.days : "")]);
+  fields.push(["HubSpot", stage.hubspot]);
+  fields.push(["MailerLite", stage.mailerLite]);
+  if (stage.warning) fields.push(["Warning", stage.warning]);
+  fields.push(["Priority", stage.priority]);
+
+  return html`
+    <div style=${{
+      position: "fixed", top: 68, right: 16, width: 360, maxHeight: 420, zIndex: 1000,
+      background: "#fff", borderRadius: 14, boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
+      overflow: "hidden", display: "flex", flexDirection: "column",
+    }}>
+      <div style=${{
+        background: groupColor, padding: "12px 16px", display: "flex",
+        alignItems: "center", justifyContent: "space-between",
+      }}>
+        <div style=${{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style=${{ fontSize: 20 }}>${icon}</span>
+          <span style=${{ fontSize: 17, fontWeight: 700, color: "#fff" }}>
+            ${stage.code} ${stage.label}
+          </span>
+        </div>
+        <button onClick=${onClose} style=${{
+          background: "rgba(255,255,255,0.2)", border: "none", color: "#fff",
+          width: 28, height: 28, borderRadius: 14, cursor: "pointer", fontSize: 16,
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>\u2715</button>
+      </div>
+      <div style=${{ padding: 16, overflowY: "auto", flex: 1 }}>
+        ${fields.map(([k, v]) => v ? html`
+          <div key=${k} style=${{ marginBottom: 12 }}>
+            <div style=${{ fontSize: 12, fontWeight: 700, color: "#94a3b8",
+              textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 2 }}>${k}</div>
+            <div style=${{ fontSize: 16, fontWeight: 400, color: "#1e293b", wordBreak: "break-word" }}>${v}</div>
+          </div>
+        ` : null)}
+      </div>
+    </div>
+  `;
+});
+
+// =============================================================================
+// COLLAPSIBLE TABLE
+// =============================================================================
+
+const BottomTable = memo(function BottomTable({ stages, activeView }) {
+  const [expanded, setExpanded] = useState(false);
+  const showHubspot = activeView === "HubSpot Setup" || activeView === "Full Detail";
+  const showEmails = activeView === "Email Sequences" || activeView === "Full Detail";
+
+  return html`
+    <div style=${{
+      position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 900,
+      background: "#fff", boxShadow: "0 -2px 12px rgba(0,0,0,0.08)",
+      transition: "max-height 0.3s ease",
+      maxHeight: expanded ? "40vh" : 48,
+      overflow: "hidden", display: "flex", flexDirection: "column",
+    }}>
+      <div onClick=${() => setExpanded(e => !e)} style=${{
+        height: 48, minHeight: 48, display: "flex", alignItems: "center", justifyContent: "center",
+        cursor: "pointer", gap: 8, borderBottom: expanded ? "1px solid #e2e8f0" : "none",
+      }}>
+        <span style=${{ fontSize: 16, fontWeight: 600, color: "#475569" }}>
+          ${expanded ? "\u25bc" : "\u25b2"} Stage Table
+        </span>
+      </div>
+      ${expanded && html`
+        <div style=${{ overflowY: "auto", flex: 1 }}>
+          <table style=${{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+            <thead>
+              <tr style=${{ position: "sticky", top: 0, background: "#f1f5f9", zIndex: 1 }}>
+                <th style=${{ ...thStyle }}>Code</th>
+                <th style=${{ ...thStyle }}>Label</th>
+                <th style=${{ ...thStyle }}>Group</th>
+                <th style=${{ ...thStyle }}>Trigger</th>
+                <th style=${{ ...thStyle }}>Goal</th>
+                ${showHubspot && html`<th style=${{ ...thStyle }}>HubSpot</th>`}
+                ${showEmails && html`<th style=${{ ...thStyle }}>Sequence</th>`}
+                ${showEmails && html`<th style=${{ ...thStyle }}>Emails</th>`}
+              </tr>
+            </thead>
+            <tbody>
+              ${stages.map(s => html`
+                <tr key=${s.id} style=${{ borderBottom: "1px solid #f1f5f9" }}>
+                  <td style=${{ ...tdStyle, fontWeight: 600 }}>${s.code}</td>
+                  <td style=${{ ...tdStyle }}>${s.label}</td>
+                  <td style=${{ ...tdStyle }}>
+                    <span style=${{
+                      display: "inline-block", padding: "2px 8px", borderRadius: 10,
+                      fontSize: 13, fontWeight: 600, color: "#fff",
+                      background: GROUP_COLORS[s.group] || "#64748b",
+                    }}>${s.group}</span>
+                  </td>
+                  <td style=${{ ...tdStyle }}>${s.trigger || "\u2014"}</td>
+                  <td style=${{ ...tdStyle }}>${s.goal || "\u2014"}</td>
+                  ${showHubspot && html`<td style=${{ ...tdStyle, fontFamily: "monospace" }}>${s.hubspot || "\u2014"}</td>`}
+                  ${showEmails && html`<td style=${{ ...tdStyle, fontFamily: "monospace" }}>${s.sequence || "\u2014"}</td>`}
+                  ${showEmails && html`<td style=${{ ...tdStyle, textAlign: "center" }}>${s.emails || "\u2014"}</td>`}
+                </tr>
+              `)}
+            </tbody>
+          </table>
+        </div>
+      `}
+    </div>
+  `;
+});
+
+const thStyle = { padding: "10px 12px", textAlign: "left", fontWeight: 700, fontSize: 14, color: "#475569" };
+const tdStyle = { padding: "8px 12px", fontWeight: 400, fontSize: 14, color: "#1e293b" };
+
+// =============================================================================
+// LEGEND
+// =============================================================================
+
+const Legend = memo(function Legend() {
+  const [open, setOpen] = useState(false);
+
+  if (!open) {
+    return html`
+      <button onClick=${() => setOpen(true)} style=${{
+        position: "fixed", bottom: 60, left: 60, zIndex: 950, padding: "8px 14px",
+        borderRadius: 10, border: "1px solid #e2e8f0", background: "#fff", cursor: "pointer",
+        fontSize: 14, fontWeight: 400, color: "#475569", boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
+      }}>\u2753 Legend</button>
+    `;
+  }
+
+  return html`
+    <div style=${{
+      position: "fixed", bottom: 60, left: 60, zIndex: 950, width: 300,
+      background: "#fff", borderRadius: 14, border: "1px solid #e2e8f0",
+      boxShadow: "0 4px 16px rgba(0,0,0,0.12)", padding: 16,
+    }}>
+      <div style=${{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <span style=${{ fontSize: 16, fontWeight: 700, color: "#1e293b" }}>Legend</span>
+        <button onClick=${() => setOpen(false)} style=${{
+          background: "none", border: "none", cursor: "pointer", fontSize: 14, color: "#64748b",
+        }}>\u2715 Close</button>
+      </div>
+      <div style=${{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 12px", marginBottom: 14 }}>
+        ${Object.entries(TYPE_ICONS).filter(([k]) => k !== "entry").map(([type, icon]) => html`
+          <div key=${type} style=${{ display: "flex", alignItems: "center", gap: 6, fontSize: 14, color: "#475569" }}>
+            <span style=${{ fontSize: 18 }}>${icon}</span> ${type}
+          </div>
+        `)}
+      </div>
+      <div style=${{ borderTop: "1px solid #e2e8f0", paddingTop: 10, display: "flex", flexWrap: "wrap", gap: 6 }}>
+        ${Object.entries(GROUP_COLORS).map(([group, color]) => html`
+          <span key=${group} style=${{
+            display: "inline-block", padding: "3px 10px", borderRadius: 10,
+            fontSize: 13, fontWeight: 600, color: "#fff", background: color,
+          }}>${GROUP_LABELS[group] || group}</span>
+        `)}
+      </div>
+    </div>
+  `;
+});
+
+// =============================================================================
+// MAIN APP
+// =============================================================================
+
+function App() {
+  const [activeView, setActiveView] = useState("Lead Journey");
+  const [selectedStage, setSelectedStage] = useState(null);
+
+  // Filter stages by view
+  const visibleStages = useMemo(() => {
+    if (activeView === "Email Sequences") {
+      return STAGES.filter(s => s.sequence !== null);
+    }
+    return STAGES;
+  }, [activeView]);
+
+  const visibleEntries = useMemo(() => {
+    if (activeView === "Email Sequences") return [];
+    return ENTRY_NODES;
+  }, [activeView]);
+
+  // Filter edges to only those connecting visible nodes
+  const visibleEdgeData = useMemo(() => {
+    const ids = new Set([...visibleStages.map(s => s.id), ...visibleEntries.map(e => e.id)]);
+    return EDGES.filter(e => ids.has(e.source) && ids.has(e.target));
+  }, [visibleStages, visibleEntries]);
+
+  // Compute layout
+  const positions = useMemo(() => {
+    return computeLayout(visibleStages, visibleEntries, visibleEdgeData);
+  }, [visibleStages, visibleEntries, visibleEdgeData]);
+
+  // Build ReactFlow nodes
+  const flowNodes = useMemo(() => {
+    const nodes = [];
+    visibleEntries.forEach(e => {
+      nodes.push({
+        id: e.id, type: "entry",
+        position: positions[e.id] || { x: 0, y: 0 },
+        data: { entry: e },
+        style: { width: ENTRY_W, height: ENTRY_H },
+      });
+    });
+    visibleStages.forEach(s => {
+      nodes.push({
+        id: s.id, type: "stage",
+        position: positions[s.id] || { x: 0, y: 0 },
+        data: { stage: s, view: activeView },
+        style: { width: STAGE_W, height: STAGE_H },
+      });
+    });
+    return nodes;
+  }, [visibleStages, visibleEntries, positions, activeView]);
+
+  // Build ReactFlow edges
+  const flowEdges = useMemo(() => {
+    return visibleEdgeData.map((e, i) => {
+      const color = edgeColor(e.label);
+      return {
+        id: e.source + "-" + e.target + "-" + i,
+        source: e.source, target: e.target,
+        type: "funnel",
+        animated: !!e.loop,
+        data: { label: e.label, loop: e.loop },
+        markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: color },
+      };
+    });
+  }, [visibleEdgeData]);
+
+  const onNodeClick = useCallback((_, node) => {
+    if (node.type === "entry") return;
+    const stage = node.data.stage;
+    setSelectedStage(prev => prev && prev.id === stage.id ? null : stage);
+  }, []);
+
+  const closeDetail = useCallback(() => setSelectedStage(null), []);
+
+  const onViewChange = useCallback((v) => {
+    setActiveView(v);
+    setSelectedStage(null);
+  }, []);
+
+  const minimapColor = useCallback((node) => {
+    if (node.data.entry) return node.data.entry.color;
+    if (node.data.stage) return GROUP_COLORS[node.data.stage.group] || "#64748b";
+    return "#64748b";
+  }, []);
+
+  // Remove loading screen on mount
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const el = document.getElementById("loading-overlay");
+      if (el) { el.classList.add("fade-out"); setTimeout(() => el.remove(), 400); }
+    }, 500);
+    return () => clearTimeout(t);
+  }, []);
+
+  return html`
+    <div style=${{ width: "100%", height: "100vh", background: "#f8fafc", position: "relative" }}>
+      <${TopBar} activeView=${activeView} onViewChange=${onViewChange}
+        stageCount=${visibleStages.length} edgeCount=${visibleEdgeData.length} />
+
+      <div style=${{ width: "100%", height: "100%", paddingTop: 56 }}>
+        <${ReactFlow}
+          key=${activeView}
+          nodes=${flowNodes}
+          edges=${flowEdges}
+          nodeTypes=${nodeTypes}
+          edgeTypes=${edgeTypes}
+          onNodeClick=${onNodeClick}
+          fitView=${true}
+          fitViewOptions=${{ padding: 0.15 }}
+          minZoom=${0.3}
+          maxZoom=${2.0}
+          proOptions=${{ hideAttribution: true }}
+        >
+          <${Background} color="#e2e8f0" gap=${20} />
+          <${MiniMap}
+            nodeColor=${minimapColor}
+            maskColor="rgba(0,0,0,0.08)"
+            style=${{ top: 12, right: 12 }}
+          />
+          <${Controls} style=${{ bottom: 60, left: 12 }} />
+        <//>
+      </div>
+
+      <${DetailCard} stage=${selectedStage} onClose=${closeDetail} />
+      <${BottomTable} stages=${visibleStages} activeView=${activeView} />
+      <${Legend} />
+    </div>
+  `;
+}
+
+// =============================================================================
+// MOUNT
+// =============================================================================
+
+const root = createRoot(document.getElementById("root"));
+root.render(html`<${App} />`);
+
+  </script>
+</body>
+</html>
