@@ -529,7 +529,7 @@ export const nodes = [
   {
     id: 'lead_lost_reactivation',
     type: 'lost',
-    priority: 'P2',
+    priority: 'P1',
     label: 'Deal Lost → Reactivation Cohort',
     hubspot: {
       dealStage: 'Lost - Reactivation',
@@ -986,7 +986,7 @@ export const hubspotTable = [
   { num: 14, dealStage: 'Objections Call No-Show', leadStatus: 'Attempted', lifecycle: 'Lead', emailerSequence: 'NOSHOW_OBJECTIONS_[SEG]', updatedBy: 'Salesperson', trigger: 'Emailer pulls Deal Stage', priority: 'P2' },
   { num: 15, dealStage: 'Objections Call Held', leadStatus: 'Connected', lifecycle: 'Lead', emailerSequence: '—', updatedBy: 'Salesperson', trigger: '—', priority: 'P2' },
   { num: 16, dealStage: 'Thinking Period', leadStatus: 'In Progress', lifecycle: 'Lead', emailerSequence: 'THINKING_PERIOD_[SEG]', updatedBy: 'Salesperson', trigger: 'Emailer pulls Deal Stage', priority: 'P2' },
-  { num: 17, dealStage: 'Lost - Reactivation', leadStatus: 'Unqualified', lifecycle: 'Lead', emailerSequence: '— (quarterly batch)', updatedBy: 'Salesperson', trigger: 'Manual quarterly', priority: 'P2' },
+  { num: 17, dealStage: 'Lost - Reactivation', leadStatus: 'Unqualified', lifecycle: 'Lead', emailerSequence: '— (quarterly batch)', updatedBy: 'Salesperson', trigger: 'Manual quarterly', priority: 'P1' },
   { num: 18, dealStage: 'Discovery Sprint Active', leadStatus: 'Won', lifecycle: 'Customer', emailerSequence: 'ONBOARDING_SPRINT_[SEG]', updatedBy: 'Salesperson', trigger: 'Emailer pulls Deal Stage', priority: 'P2' },
   { num: 19, dealStage: 'Sprint In Delivery', leadStatus: 'Won', lifecycle: 'Customer', emailerSequence: '—', updatedBy: 'Salesperson', trigger: '—', priority: 'P3' },
   { num: 20, dealStage: 'Materials Presentation Scheduled', leadStatus: 'Won', lifecycle: 'Customer', emailerSequence: 'REMINDER_MATERIALS_[SEG]', updatedBy: 'Salesperson', trigger: 'Emailer pulls Deal Stage', priority: 'P3' },

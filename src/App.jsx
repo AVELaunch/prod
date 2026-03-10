@@ -1,5 +1,5 @@
-import { useState, useMemo, useCallback } from 'react';
-import { ReactFlow, Background, MiniMap, Controls, useNodesState, useEdgesState } from '@xyflow/react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
+import { ReactFlow, Background, MiniMap, Controls, MarkerType } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { nodes as rawNodes, edges as rawEdges, NODE_COLORS, hubspotTable } from './funnelData';
 import { getLayoutedElements } from './layoutEngine';
@@ -32,6 +32,7 @@ function buildFlowEdges(rawEdges) {
     source: e.source,
     target: e.target,
     type: 'funnel',
+    markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
     data: {
       edgeType: e.edgeType,
       isLoop: e.isLoop,
@@ -40,6 +41,9 @@ function buildFlowEdges(rawEdges) {
     priority: e.priority,
   }));
 }
+
+// ─── Build node priority lookup ─────────────────────────────────────────
+const nodePriorityMap = Object.fromEntries(rawNodes.map((n) => [n.id, n.priority]));
 
 // ─── Compute layout once ────────────────────────────────────────────────
 const initialFlowNodes = buildFlowNodes(rawNodes);
@@ -50,6 +54,13 @@ const layoutedNodes = getLayoutedElements(initialFlowNodes, initialFlowEdges);
 function SidePanel({ node, onClose }) {
   if (!node) return null;
   const d = node;
+
+  useEffect(() => {
+    const handler = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose]);
+
   return (
     <div className="fixed right-0 top-0 h-full w-96 bg-white shadow-2xl border-l border-gray-200 z-50 overflow-y-auto">
       <div className="p-5">
@@ -213,7 +224,7 @@ function ColorLegend() {
     { color: NODE_COLORS.meeting, label: 'Call / Meeting' },
   ];
   return (
-    <div className="absolute bottom-4 left-4 z-40 bg-white rounded-lg border border-gray-200 shadow-sm p-3">
+    <div className="absolute bottom-14 left-4 z-40 bg-white rounded-lg border border-gray-200 shadow-sm p-3">
       <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Node Types</h3>
       <div className="grid grid-cols-2 gap-x-4 gap-y-1">
         {items.map((item) => (
@@ -228,13 +239,21 @@ function ColorLegend() {
 }
 
 // ─── HubSpot Table Panel ────────────────────────────────────────────────
+function csvQuote(val) {
+  const s = String(val);
+  if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+    return '"' + s.replace(/"/g, '""') + '"';
+  }
+  return s;
+}
+
 function HubSpotTablePanel() {
   const [open, setOpen] = useState(false);
 
   const exportCSV = useCallback(() => {
     const header = ['#', 'Deal Stage', 'Lead Status', 'Lifecycle', 'Emailer Sequence', 'Updated By', 'Trigger', 'Priority'];
     const rows = hubspotTable.map((r) =>
-      [r.num, r.dealStage, r.leadStatus, r.lifecycle, r.emailerSequence, r.updatedBy, r.trigger, r.priority].join(',')
+      [r.num, r.dealStage, r.leadStatus, r.lifecycle, r.emailerSequence, r.updatedBy, r.trigger, r.priority].map(csvQuote).join(',')
     );
     const csv = [header.join(','), ...rows].join('\n');
     navigator.clipboard.writeText(csv).then(() => {
@@ -324,20 +343,25 @@ export default function App() {
 
   const allowedPriorities = PRIORITY_LEVELS[priorityFilter];
 
-  // Apply priority visibility (hide, don't re-layout)
+  // Compute visible node IDs first, then use for edge filtering
+  const visibleNodeIds = useMemo(() => {
+    return new Set(rawNodes.filter((n) => allowedPriorities.includes(n.priority)).map((n) => n.id));
+  }, [allowedPriorities]);
+
   const visibleNodes = useMemo(() => {
     return layoutedNodes.map((n) => ({
       ...n,
-      hidden: !allowedPriorities.includes(n.data.priority),
+      hidden: !visibleNodeIds.has(n.id),
     }));
-  }, [allowedPriorities]);
+  }, [visibleNodeIds]);
 
+  // Edge is visible only if BOTH source and target nodes are visible
   const visibleEdges = useMemo(() => {
     return initialFlowEdges.map((e) => ({
       ...e,
-      hidden: !allowedPriorities.includes(e.priority),
+      hidden: !visibleNodeIds.has(e.source) || !visibleNodeIds.has(e.target),
     }));
-  }, [allowedPriorities]);
+  }, [visibleNodeIds]);
 
   const onNodeClick = useCallback((_event, node) => {
     setSelectedNode(node.data);

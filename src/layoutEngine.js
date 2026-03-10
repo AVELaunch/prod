@@ -14,8 +14,8 @@ export function getLayoutedElements(nodes, edges) {
   g.setDefaultEdgeLabel(() => ({}));
   g.setGraph({
     rankdir: 'TB',
-    nodesep: 60,
-    ranksep: 80,
+    nodesep: 80,
+    ranksep: 100,
     marginx: 40,
     marginy: 40,
   });
